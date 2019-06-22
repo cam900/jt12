@@ -6,6 +6,7 @@
 *.vcd
 *.vgm
 *.lxt
+.vscode/*
 ver/vgm/*
 last.jtt
 history

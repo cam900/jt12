@@ -24,6 +24,9 @@ module jt12_dout(
     input             clk,        // CPU clock
     input             flag_A,
     input             flag_B,
+    // FIFO
+    input             fifo_full,
+    input             fifo_empty,
     input             busy,
     input      [5:0]  adpcma_flags,
     input             adpcmb_flag,
@@ -32,15 +35,17 @@ module jt12_dout(
     output reg [7:0]  dout
 );
 
-parameter use_ssg=0, use_adpcm=0;
+parameter use_ssg=0, use_adpcm=0, use_fifo=0;
 
+wire [7:0] common_dout;
+assign common_dout <= (use_fifo ==1) ? {busy, fifo_full, fifo_empty, 3'd0, flag_B, flag_A } : {busy, 5'd0, flag_B, flag_A };
 always @(posedge clk) begin
     casez( addr )
-        2'b00: dout <= {busy, 5'd0, flag_B, flag_A }; // YM2203
-        2'b01: dout <= (use_ssg  ==1) ? psg_dout : {busy, 5'd0, flag_B, flag_A };
+        2'b00: dout <= common_dout; // YM2203
+        2'b01: dout <= (use_ssg  ==1) ? psg_dout : common_dout;
         2'b1?: dout <= (use_adpcm==1) ?
             { adpcmb_flag, 1'b0, adpcma_flags } :
-            { busy, 5'd0, flag_B, flag_A };
+            common_dout;
     endcase
 end
 

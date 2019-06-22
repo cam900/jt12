@@ -37,7 +37,7 @@ module jt12_acc(
     input               rst,
     input               clk,
     input               clk_en /* synthesis direct_enable */,
-    input signed [8:0]  op_result,
+    input signed [13:0] op_result,
     input        [ 1:0] rl,
     input               zero,
     input               s1_enters,
@@ -49,8 +49,8 @@ module jt12_acc(
     input               pcm_en, // only enabled for channel 6
     input   signed [8:0] pcm,
     // combined output
-    output reg signed   [11:0]  left,
-    output reg signed   [11:0]  right
+    output reg signed   [15:0]  left,
+    output reg signed   [15:0]  right
 );
 
 reg sum_en;
@@ -75,11 +75,11 @@ wire sum_or_pcm = sum_en | use_pcm;
 wire left_en = rl[1];
 wire right_en= rl[0];
 wire signed [8:0] pcm_data = pcm_sum ? pcm : 9'd0;
-wire [8:0] acc_input =  use_pcm ? pcm_data : op_result;
+wire [13:0] acc_input =  use_pcm ? { pcm_data, 5'd0 } : op_result;
 
 // Continuous output
-wire signed   [11:0]  pre_left, pre_right;
-jt12_single_acc #(.win(9),.wout(12)) u_left(
+wire signed   [15:0]  pre_left, pre_right;
+jt12_single_acc #(.win(14),.wout(16)) u_left(
     .clk        ( clk            ),
     .clk_en     ( clk_en         ),
     .op_result  ( acc_input      ),
@@ -88,7 +88,7 @@ jt12_single_acc #(.win(9),.wout(12)) u_left(
     .snd        ( pre_left       )
 );
 
-jt12_single_acc #(.win(9),.wout(12)) u_right(
+jt12_single_acc #(.win(14),.wout(16)) u_right(
     .clk        ( clk            ),
     .clk_en     ( clk_en         ),
     .op_result  ( acc_input      ),
@@ -100,8 +100,8 @@ jt12_single_acc #(.win(9),.wout(12)) u_right(
 // Output can be amplied by 8/6=1.33 to use full range
 // an easy alternative is to add 1/4th and get 1.25 amplification
 always @(posedge clk) if(clk_en) begin
-    left  <= pre_left  + { {2{left [11]}}, left [11:2] };
-    right <= pre_right + { {2{right[11]}}, right[11:2] };
+    left  <= pre_left  + { {2{left [15]}}, left [15:2] };
+    right <= pre_right + { {2{right[15]}}, right[15:2] };
 end
 
 endmodule

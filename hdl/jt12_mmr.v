@@ -32,6 +32,8 @@ module jt12_mmr(
     input   [7:0]   din,
     input           write,
     input   [1:0]   addr,
+    output  [7:0]   din_out,
+    output  [1:0]   addr_out,
     output  reg     busy,
     output          ch6op,
     output  [2:0]   cur_ch,
@@ -120,10 +122,17 @@ module jt12_mmr(
     // PSG interace
     output  [3:0]   psg_addr,
     output  [7:0]   psg_data,
-    output  reg     psg_wr_n
+    output  reg     psg_wr_n,
+
+    // FIFO
+    input   [9:0]   fifo_data,
+    output  reg [10:0] fifo_addr_r,
+    input   [10:0]  fifo_addr_w,
+    output          fifo_full,
+    output  reg     fifo_empty,
 );
 
-parameter use_ssg=0, num_ch=6, use_pcm=1, use_adpcm=0;
+parameter use_ssg=0, num_ch=6, use_pcm=1, use_adpcm=0, use_fifo=0;
 
 reg [1:0] div_setting;
 
@@ -259,8 +268,8 @@ always @(posedge clk) begin : memory_mapped_registers
         // WRITE IN REGISTERS
         if( write ) begin
             if( !addr[0] ) begin
-                selected_register <= din;  
-                part <= addr[1];             
+                selected_register <= din;
+                part <= addr[1];
             end else begin
                 // Global registers
                 din_copy <= din;
@@ -413,7 +422,18 @@ always @(posedge clk)
             busy_cnt <= 5'd0;
         end
         else if(clk_en) begin
-            if( busy_cnt == 5'd31 ) busy <= 1'b0;
+            if( busy_cnt == 5'd31 ) begin
+                if ( use_fifo && !fifo_empty ) begin
+                    addr_out <= fifo_data[9:8];
+                    din_out <= fifo_data[7:0];
+                    fifo_addr_r <= fifo_addr_r + 1;
+                    fifo_full <= 1'b0;
+                    if (fifo_addr_r == fifo_addr_w)
+                        fifo_empty <= 1'b1;
+                end
+                else
+                    busy <= 1'b0;
+            end
             busy_cnt <= busy_cnt+5'd1;
         end
     end

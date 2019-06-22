@@ -65,7 +65,7 @@ module jt12_top (
 // parameters to select the features for each chip type
 // defaults to YM2612
 parameter use_lfo=1, use_ssg=0, num_ch=6, use_pcm=1;
-parameter use_adpcm=0;
+parameter use_adpcm=0, use_fifo=0;
 
 wire flag_A, flag_B, busy;
 
@@ -158,6 +158,9 @@ wire [ 6:0] flag_ctl;
 
 
 wire clk_en_666, clk_en_111, clk_en_55;
+reg [9:0] fifo_data[0:2047];
+reg [10:0] fifo_addr_r, fifo_addr_w;
+wire fifo_full, fifo_empty;
 
 generate
 if( use_adpcm==1 ) begin: gen_adpcm
@@ -264,11 +267,13 @@ end
 endgenerate
 
 /* verilator tracing_off */
-jt12_dout #(.use_ssg(use_ssg),.use_adpcm(use_adpcm)) u_dout(
+jt12_dout #(.use_ssg(use_ssg),.use_adpcm(use_adpcm), .use_fifo(use_fifo)) u_dout(
 //    .rst_n          ( rst_n         ),
     .clk            ( clk           ),        // CPU clock
     .flag_A         ( flag_A        ),
     .flag_B         ( flag_B        ),
+    .fifo_full      ( fifo_full     ),
+    .fifo_empty     ( fifo_empty    ),
     .busy           ( busy          ),
     .adpcma_flags   ( adpcma_flags  ),
     .adpcmb_flag    ( adpcmb_flag   ),
@@ -277,9 +282,40 @@ jt12_dout #(.use_ssg(use_ssg),.use_adpcm(use_adpcm)) u_dout(
     .dout           ( dout          )
 );
 
+reg [1:0] addr_in, addr_out;
+reg [7:0] din_in, din_out;
+always @(posedge clk) begin
+    if( rst ) begin
+        addr_out <= 8'd0;
+        din_out <= 8'd0;
+        fifo_full <= 1'b0;
+        fifo_empty <= 1'b1;
+        fifo_addr_r <= 11'd0;
+        fifo_addr_w <= 11'd0;
+    end
+    else begin
+        if( write ) begin
+            if( busy ) begin
+                if( !fifo_full && use_fifo ) begin
+                    fifo_data[fifo_addr_w] <= { addr, din };
+                    fifo_addr_w <= fifo_addr_w + 1;
+                    fifo_empty <= 1'b0;
+                    if (fifo_addr_r == fifo_addr_w)
+                        fifo_full <= 1'b1;
+                end
+            end
+            else begin
+                addr_out <= addr;
+                din_out <= din;
+            end
+        end
+    end
+    addr_in <= addr_out;
+    din_in <= din_out;
+end
 
 /* verilator tracing_off */
-jt12_mmr #(.use_ssg(use_ssg),.num_ch(num_ch),.use_pcm(use_pcm), .use_adpcm(use_adpcm))
+jt12_mmr #(.use_ssg(use_ssg),.num_ch(num_ch),.use_pcm(use_pcm), .use_adpcm(use_adpcm), .use_fifo(use_fifo))
     u_mmr(
     .rst        ( rst       ),
     .clk        ( clk       ),
@@ -289,9 +325,11 @@ jt12_mmr #(.use_ssg(use_ssg),.num_ch(num_ch),.use_pcm(use_pcm), .use_adpcm(use_a
     .clk_en_666 ( clk_en_666),
     .clk_en_111 ( clk_en_111),
     .clk_en_55  ( clk_en_55 ),
-    .din        ( din       ),
+    .din        ( din_in    ),
     .write      ( write     ),
-    .addr       ( addr      ),
+    .addr       ( addr_in   ),
+    .din_out    ( din_out   ),
+    .addr_out   ( addr_out  ),
     .busy       ( busy      ),
     .ch6op      ( ch6op     ),
     .cur_ch     ( cur_ch    ),
@@ -379,7 +417,13 @@ jt12_mmr #(.use_ssg(use_ssg),.num_ch(num_ch),.use_pcm(use_pcm), .use_adpcm(use_a
     // PSG interace
     .psg_addr   ( psg_addr  ),
     .psg_data   ( psg_data  ),
-    .psg_wr_n   ( psg_wr_n  )
+    .psg_wr_n   ( psg_wr_n  ),
+    // FIFO
+    .fifo_data  ( fifo_data[fifo_addr_r]),
+    .fifo_addr_r ( fifo_addr_r),
+    .fifo_addr_w ( fifo_addr_w),
+    .fifo_full  ( fifo_full ),
+    .fifo_empty ( fifo_empty)
 );
 
 /* verilator tracing_off */
@@ -562,8 +606,6 @@ assign op_result_hd = 'd0;
 
 generate
     if( use_pcm==1 ) begin: gen_pcm_acc // YM2612 accumulator
-        assign fm_snd_right[3:0] = 4'd0;
-        assign fm_snd_left [3:0] = 4'd0;
         assign snd_sample        = zero;
         reg signed [8:0] pcm2;
 
@@ -611,7 +653,7 @@ generate
             .rst        ( rst       ),
             .clk        ( clk       ),
             .clk_en     ( clk_en    ),
-            .op_result  ( op_result ),
+            .op_result  ( op_result_hd ),
             .rl         ( rl        ),
             // note that the order changes to deal
             // with the operator pipeline delay
@@ -625,11 +667,31 @@ generate
             .pcm        ( pcm2      ),
             .alg        ( alg_I     ),
             // combined output
-            .left       ( fm_snd_left [15:4]  ),
-            .right      ( fm_snd_right[15:4]  )
+            .left       ( fm_snd_left   ),
+            .right      ( fm_snd_right  )
         );
     end
-    if( use_pcm==0 && use_adpcm==0 ) begin : gen_2203_acc // YM2203 accumulator
+    if( use_pcm==0 && use_adpcm==0 && use_lfo==1 ) begin : gen_2203sf_acc // YM2203SF accumulator
+        assign snd_sample   = zero;
+        jt03sf_acc u_acc(
+            .rst        ( rst       ),
+            .clk        ( clk       ),
+            .clk_en     ( clk_en    ),
+            .op_result  ( op_result_hd ),
+            // note that the order changes to deal
+            // with the operator pipeline delay
+            .s1_enters  ( s1_enters ),
+            .s2_enters  ( s2_enters ),
+            .s3_enters  ( s3_enters ),
+            .s4_enters  ( s4_enters ),
+            .alg        ( alg_I     ),
+            .zero       ( zero      ),
+            // combined output
+            .left       ( fm_snd_left  ),
+            .right      ( fm_snd_right  )
+        );
+    end
+    if( use_pcm==0 && use_adpcm==0 && use_lfo==0 ) begin : gen_2203_acc // YM2203 accumulator
         wire signed [15:0] mono_snd;
         assign fm_snd_left  = mono_snd;
         assign fm_snd_right = mono_snd;

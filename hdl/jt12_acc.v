@@ -100,8 +100,8 @@ jt12_single_acc #(.win(14),.wout(16)) u_right(
 // Output can be amplied by 8/6=1.33 to use full range
 // an easy alternative is to add 1/4th and get 1.25 amplification
 always @(posedge clk) if(clk_en) begin
-    left  <= pre_left  + { {2{left [15]}}, left [15:2] };
-    right <= pre_right + { {2{right[15]}}, right[15:2] };
+    left  <= pre_left  + { {2{pre_left [15]}}, pre_left [15:2] };
+    right <= pre_right + { {2{pre_right[15]}}, pre_right[15:2] };
 end
 
 endmodule

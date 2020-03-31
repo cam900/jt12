@@ -54,7 +54,10 @@ module jt10_acc(
     input signed [15:0] adpcmB_r,
     // combined output
     output signed [15:0] left,
-    output signed [15:0] right
+    output signed [15:0] right,
+    // combined output (YM2610B mode)
+    output signed [15:0] left2610b,
+    output signed [15:0] right2610b
 );
 
 reg sum_en;
@@ -72,7 +75,18 @@ wire left_en = rl[1];
 wire right_en= rl[0];
 wire signed [15:0] opext = { {2{op_result[13]}}, op_result };
 reg  signed [15:0] acc_input_l, acc_input_r;
+reg  signed [15:0] acc2610bfm_input_l, acc2610bfm_input_r;
+reg  signed [15:0] acc2610badpcma_input_l, acc2610badpcma_input_r;
+reg  signed [15:0] acc2610badpcmb_input_l, acc2610badpcmb_input_r;
 reg acc_en_l, acc_en_r;
+reg acc2610bfm_en_l, acc2610bfm_en_r;
+wire signed [17:0] acc2610bl, acc2610br;
+
+assign acc2610bl = acc2610bfm_input_l + acc2610badpcma_input_l + acc2610badpcmb_input_l;
+assign left2610b = {acc2610bl[17:2]};
+
+assign acc2610br  = acc2610bfm_input_l + acc2610badpcma_input_l + acc2610badpcmb_input_l;
+assign right2610b = {acc2610br[17:2]};
 
 // YM2610 mode:
 // uses channels 2 and 6 for ADPCM data, throwing away FM data for those channels
@@ -106,6 +120,14 @@ always @(*)
             acc_en_l    = sum_en & left_en;
             acc_en_r    = sum_en & right_en;
         end
+        acc2610badpcmb_input_l = adpcmB_l>>>2;
+        acc2610badpcmb_input_r = adpcmB_r>>>2;
+        acc2610badpcma_input_l = adpcmA_l<<<4;
+        acc2610badpcma_input_r = adpcmA_r<<<4;
+        acc2610bfm_input_l = opext;
+        acc2610bfm_input_r = opext;
+        acc2610bfm_en_l    = sum_en & left_en;
+        acc2610bfm_en_r    = sum_en & right_en;
     endcase
 
 // Continuous output
@@ -124,6 +146,60 @@ jt12_single_acc #(.win(16),.wout(16)) u_right(
     .clk_en     ( clk_en         ),
     .op_result  ( acc_input_r    ),
     .sum_en     ( acc_en_r       ),
+    .zero       ( zero           ),
+    .snd        ( right          )
+);
+
+jt12_single_acc #(.win(16),.wout(16)) u_dmleft(
+    .clk        ( clk            ),
+    .clk_en     ( clk_en         ),
+    .op_result  ( acc2610bfm_input_l    ),
+    .sum_en     ( acc2610bfm_en_l       ),
+    .zero       ( zero           ),
+    .snd        ( left           )
+);
+
+jt12_single_acc #(.win(16),.wout(16)) u_dmright(
+    .clk        ( clk            ),
+    .clk_en     ( clk_en         ),
+    .op_result  ( acc2610bfm_input_r    ),
+    .sum_en     ( acc2610bfm_en_r       ),
+    .zero       ( zero           ),
+    .snd        ( right          )
+);
+
+jt12_single_acc #(.win(16),.wout(16)) u_adpcmaleft(
+    .clk        ( clk            ),
+    .clk_en     ( clk_en         ),
+    .op_result  ( acc2610badpcma_input_l    ),
+    .sum_en     ( 1'b1       ),
+    .zero       ( zero           ),
+    .snd        ( left           )
+);
+
+jt12_single_acc #(.win(16),.wout(16)) u_adpcmaright(
+    .clk        ( clk            ),
+    .clk_en     ( clk_en         ),
+    .op_result  ( acc2610badpcma_input_r    ),
+    .sum_en     ( 1'b1       ),
+    .zero       ( zero           ),
+    .snd        ( right          )
+);
+
+jt12_single_acc #(.win(16),.wout(16)) u_adpcmbleft(
+    .clk        ( clk            ),
+    .clk_en     ( clk_en         ),
+    .op_result  ( acc2610badpcmb_input_l    ),
+    .sum_en     ( 1'b1           ),
+    .zero       ( zero           ),
+    .snd        ( left           )
+);
+
+jt12_single_acc #(.win(16),.wout(16)) u_adpcmbright(
+    .clk        ( clk            ),
+    .clk_en     ( clk_en         ),
+    .op_result  ( acc2610badpcmb_input_r    ),
+    .sum_en     ( 1'b1           ),
     .zero       ( zero           ),
     .snd        ( right          )
 );

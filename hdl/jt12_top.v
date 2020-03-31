@@ -51,6 +51,8 @@ module jt12_top (
     output          [ 7:0] psg_C,
     output  signed  [15:0] fm_snd_left,
     output  signed  [15:0] fm_snd_right,
+    output  signed  [15:0] fm2610b_snd_left,
+    output  signed  [15:0] fm2610b_snd_right,
     output  signed  [15:0] adpcmA_l,
     output  signed  [15:0] adpcmA_r,
     output  signed  [15:0] adpcmB_l,
@@ -250,7 +252,9 @@ if( use_adpcm==1 ) begin: gen_adpcm
         .adpcmB_r   ( adpcmB_r      ),
         // combined output
         .left       ( fm_snd_left   ),
-        .right      ( fm_snd_right  )
+        .right      ( fm_snd_right  ),
+        .left2610b  ( fm2610b_snd_left   ),
+        .right2610b ( fm2610b_snd_right  )
     );
 end else begin : gen_adpcm_no
     assign adpcmA_l     = 'd0;

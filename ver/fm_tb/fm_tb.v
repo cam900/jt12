@@ -14,9 +14,8 @@ initial begin
     forever #10 clk=~clk;
 end
 
-wire signed [15:0] left, right;
+wire signed [13:0] left, right;
 wire signed [8:0] op_result;
-wire signed [13:0] op_result_hd;
 wire	   clk6;
 
 wire [9:0] eg_atten;
@@ -127,14 +126,13 @@ jt12_op u_op(
 	.use_prev2		( use_prev2		),
 	.use_prev1		( use_prev1		),
 
-	.op_result		( op_result		),
-	.full_result    ( op_result_hd  )
+	.op_result		( op_result		)
 );
 
 jt12_acc u_acc(
 	.rst		( rst	),
 	.clk		( clk	),
-	.op_result	( op_result_hd	),
+	.op_result	( op_result		),
 	.rl			( 2'b11	),
 	// note that the order changes to deal 
 	// with the operator pipeline delay

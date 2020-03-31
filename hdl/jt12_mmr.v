@@ -25,6 +25,7 @@ module jt12_mmr(
     input           clk,
     input           cen /* synthesis direct_enable */,
     output          clk_en,
+    output          clk_en_2,
     output          clk_en_ssg,
     output          clk_en_666,
     output          clk_en_111,
@@ -32,8 +33,6 @@ module jt12_mmr(
     input   [7:0]   din,
     input           write,
     input   [1:0]   addr,
-    output  [7:0]   din_out,
-    output  [1:0]   addr_out,
     output  reg     busy,
     output          ch6op,
     output  [2:0]   cur_ch,
@@ -71,6 +70,7 @@ module jt12_mmr(
     output  reg         acmd_on_b,  // Control - Process start, Key On
     output  reg         acmd_rep_b, // Control - Repeat
     output  reg         acmd_rst_b, // Control - Reset
+    output  reg         acmd_up_b,  // Control - New cmd received
     output  reg  [ 1:0] alr_b,      // Left / Right
     output  reg  [15:0] astart_b,   // Start address
     output  reg  [15:0] aend_b,     // End   address
@@ -122,27 +122,21 @@ module jt12_mmr(
     // PSG interace
     output  [3:0]   psg_addr,
     output  [7:0]   psg_data,
-    output  reg     psg_wr_n,
-
-    // FIFO
-    input   [9:0]   fifo_data,
-    output  reg [10:0] fifo_addr_r,
-    input   [10:0]  fifo_addr_w,
-    output          fifo_full,
-    output  reg     fifo_empty,
+    output  reg     psg_wr_n
 );
 
-parameter use_ssg=0, num_ch=6, use_pcm=1, use_adpcm=0, use_fifo=0;
+parameter use_ssg=0, num_ch=6, use_pcm=1, use_adpcm=0;
 
 reg [1:0] div_setting;
 
 
-jt12_div #(.use_ssg(use_ssg),.num_ch(num_ch)) u_div (
+jt12_div #(.use_ssg(use_ssg)) u_div (
     .rst            ( rst             ),
     .clk            ( clk             ),
     .cen            ( cen             ),
     .div_setting    ( div_setting     ),
     .clk_en         ( clk_en          ),
+    .clk_en_2       ( clk_en_2        ),
     .clk_en_ssg     ( clk_en_ssg      ),
     .clk_en_666     ( clk_en_666      ),
     .clk_en_111     ( clk_en_111      ),
@@ -207,10 +201,12 @@ endgenerate
 reg part;
 
 // this runs at clk speed, no clock gating here
+// if I try to make this an async rst it fails to map it
+// as flip flops but uses latches instead. So I keep it as sync. reset
 always @(posedge clk) begin : memory_mapped_registers
     if( rst ) begin
         selected_register   <= 8'h0;
-        div_setting         <= 2'b11; 
+        div_setting         <= 2'b10; // FM=1/6, SSG=1/4
         up_ch               <= 3'd0;
         up_op               <= 2'd0;
         up_keyon            <= 1'd0;
@@ -268,8 +264,17 @@ always @(posedge clk) begin : memory_mapped_registers
         // WRITE IN REGISTERS
         if( write ) begin
             if( !addr[0] ) begin
-                selected_register <= din;
-                part <= addr[1];
+                selected_register <= din;  
+                part <= addr[1];        
+                case(din)
+                    // clock divider: should work only for ym2203
+                    // and ym2608.
+                    // clock divider works just by selecting the register
+                    REG_CLK_N6: div_setting[1] <= 1'b1; // 2D
+                    REG_CLK_N3: div_setting[0] <= 1'b1; // 2E
+                    REG_CLK_N2: div_setting    <= 2'b0; // 2F
+                    default:;
+                endcase
             end else begin
                 // Global registers
                 din_copy <= din;
@@ -300,10 +305,6 @@ always @(posedge clk) begin : memory_mapped_registers
                         `ifndef NOLFO                   
                         REG_LFO:    { lfo_en, lfo_freq } <= din[3:0];
                         `endif
-                        // clock divider
-                        REG_CLK_N6: div_setting[1] <= 1'b1; 
-                        REG_CLK_N3: div_setting[0] <= 1'b1; 
-                        REG_CLK_N2: div_setting <= 2'b0;
                         default:;
                     endcase
                 end
@@ -364,7 +365,7 @@ always @(posedge clk) begin : memory_mapped_registers
                     if( !part && selected_register[7:4]==4'h1 ) begin
                         // YM2610 ADPCM-B support, A1=0, regs 1x
                         case(selected_register[3:0])
-                            4'd0: {acmd_on_b, acmd_rep_b,acmd_rst_b} <= {din[7],din[4],din[0]};
+                            4'd0: {acmd_up_b, acmd_on_b, acmd_rep_b,acmd_rst_b} <= {1'd1,din[7],din[4],din[0]};
                             4'd1: alr_b  <= din[7:6];
                             4'd2: astart_b [ 7:0] <= din;
                             4'd3: astart_b [15:8] <= din;
@@ -406,13 +407,14 @@ always @(posedge clk) begin : memory_mapped_registers
             pcm_wr   <= 1'b0;
             flag_ctl <= 'd0;
             up_aon   <= 1'b0;
+            acmd_up_b <= 1'b0;
         end
     end
 end
 
 reg [4:0] busy_cnt; // busy lasts for 32 synth clock cycles, like in real chip
 
-always @(posedge clk)
+always @(posedge clk, posedge rst)
     if( rst ) begin
         busy <= 1'b0;
         busy_cnt <= 5'd0;
@@ -423,18 +425,7 @@ always @(posedge clk)
             busy_cnt <= 5'd0;
         end
         else if(clk_en) begin
-            if( busy_cnt == 5'd31 ) begin
-                if ( use_fifo && !fifo_empty ) begin
-                    addr_out <= fifo_data[9:8];
-                    din_out <= fifo_data[7:0];
-                    fifo_addr_r <= fifo_addr_r + 1;
-                    fifo_full <= 1'b0;
-                    if (fifo_addr_r == fifo_addr_w)
-                        fifo_empty <= 1'b1;
-                end
-                else
-                    busy <= 1'b0;
-            end
+            if( busy_cnt == 5'd31 ) busy <= 1'b0;
             busy_cnt <= busy_cnt+5'd1;
         end
     end
